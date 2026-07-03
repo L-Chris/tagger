@@ -25,7 +25,7 @@ function run(command, args, options = {}) {
   }
 }
 
-for (const entry of ['content', 'background', 'popup', 'sidepanel']) {
+for (const entry of ['content', 'background', 'sidepanel']) {
   run(process.execPath, [vite, 'build'], {
     env: { ...process.env, VITE_ENTRY: entry, VITE_OUT_DIR: outDirName },
   })
