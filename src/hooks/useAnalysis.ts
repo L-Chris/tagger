@@ -71,7 +71,7 @@ export function useAnalysis() {
 
     setState({
       loading: true,
-      step: '正在获取数据...',
+      step: '正在查询缓存...',
       error: null,
       result: null,
       articleCount: 0,
@@ -79,29 +79,14 @@ export function useAnalysis() {
       target: analysisTarget,
     })
 
-    try {
-      const maxPages = options?.maxPages ?? getDefaultMaxPages()
-      const answers = await fetchAnswers(maxPages, analysisTarget.userId, options?.tabId)
-      const articles = await fetchArticles(maxPages, analysisTarget.userId, options?.tabId)
+    const serviceUrl = SERVICE_URL.replace(/\/+$/, '')
 
-      setState((prev) => ({
-        ...prev,
-        articleCount: articles.length,
-        answerCount: answers.length,
-        step: '正在发送数据到后端分析...',
-      }))
-
-      const serviceUrl = SERVICE_URL.replace(/\/+$/, '')
+    // Helper: POST to backend and parse response
+    const callBackend = async (body: Record<string, unknown>) => {
       const response = await fetch(`${serviceUrl}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          platform: 'zhihu',
-          platformUserId: analysisTarget.userId,
-          userName: analysisTarget.userName,
-          articles,
-          answers,
-        }),
+        body: JSON.stringify(body),
       })
 
       if (!response.ok) {
@@ -111,6 +96,7 @@ export function useAnalysis() {
 
       const json = await response.json() as {
         success: boolean
+        cached?: boolean
         data?: {
           riskLevel: string
           totalScore: number
@@ -118,6 +104,8 @@ export function useAnalysis() {
           tags: unknown
           dimensions: unknown
           evidence: unknown
+          articleCount?: number
+          answerCount?: number
         }
       }
 
@@ -134,23 +122,58 @@ export function useAnalysis() {
         evidence: Array.isArray(json.data.evidence) ? json.data.evidence.map(String) : [],
       }
 
+      return { result, cached: json.cached === true, articleCount: json.data.articleCount ?? 0, answerCount: json.data.answerCount ?? 0 }
+    }
+
+    const finishWith = (result: AnalysisJsonResult, articleCount: number, answerCount: number) => {
       const resultText = formatAnalysisAsMarkdown(result)
+      setState((prev) => ({ ...prev, loading: false, step: '', result: resultText, articleCount, answerCount }))
+      options?.onComplete?.(result)
+    }
+
+    try {
+      // Step 1: Check cache (no data)
+      try {
+        const { result, articleCount, answerCount } = await callBackend({
+          platform: 'zhihu',
+          platformUserId: analysisTarget.userId,
+          userName: analysisTarget.userName,
+        })
+        finishWith(result, articleCount, answerCount)
+        return
+      } catch (err) {
+        // 404 means no cached result, proceed to fetch
+        const msg = err instanceof Error ? err.message : ''
+        if (!msg.includes('404')) {
+          throw err
+        }
+      }
+
+      // Step 2: Fetch from Zhihu
+      setState((prev) => ({ ...prev, step: '正在获取数据...' }))
+      const maxPages = options?.maxPages ?? getDefaultMaxPages()
+      const answers = await fetchAnswers(maxPages, analysisTarget.userId, options?.tabId)
+      const articles = await fetchArticles(maxPages, analysisTarget.userId, options?.tabId)
 
       setState((prev) => ({
         ...prev,
-        loading: false,
-        step: '',
-        result: resultText,
+        articleCount: articles.length,
+        answerCount: answers.length,
+        step: '正在发送数据到后端分析...',
       }))
-      options?.onComplete?.(result)
+
+      // Step 3: Send data and analyze
+      const { result } = await callBackend({
+        platform: 'zhihu',
+        platformUserId: analysisTarget.userId,
+        userName: analysisTarget.userName,
+        articles,
+        answers,
+      })
+      finishWith(result, articles.length, answers.length)
     } catch (err) {
       const error = err instanceof Error ? err.message : '分析失败'
-      setState((prev) => ({
-        ...prev,
-        loading: false,
-        step: '',
-        error,
-      }))
+      setState((prev) => ({ ...prev, loading: false, step: '', error }))
       options?.onError?.(error)
     }
   }, [])
