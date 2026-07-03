@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Dominator",
+  "version": "1.0.0",
+  "description": "分析知乎用户是否存在异常推广或操纵风险",
+  "permissions": ["storage", "activeTab", "cookies", "sidePanel", "tabs"],
+  "host_permissions": [
+    "https://www.zhihu.com/*",
+    "https://api.zhihu.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.zhihu.com/people/*", "https://www.zhihu.com/question/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Dominator",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
