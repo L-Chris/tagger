@@ -138,6 +138,7 @@ export function useAnalysis() {
           platform: 'zhihu',
           platformUserId: analysisTarget.userId,
           userName: analysisTarget.userName,
+          cacheOnly: true,
         })
         finishWith(result, articleCount, answerCount)
         return
@@ -167,6 +168,7 @@ export function useAnalysis() {
         platform: 'zhihu',
         platformUserId: analysisTarget.userId,
         userName: analysisTarget.userName,
+        cacheOnly: false,
         articles,
         answers,
       })

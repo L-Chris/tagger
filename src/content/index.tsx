@@ -77,6 +77,7 @@ async function runSimpleAnalysisBatch() {
       const cachedData = await withTimeout(
         quickAnalyzeInBackground({
           platform: 'zhihu',
+          cacheOnly: true,
           users: targets.map((target) => ({
             platformUserId: target.userId,
             userName: target.userName,
@@ -110,6 +111,7 @@ async function runSimpleAnalysisBatch() {
     const data = await withTimeout(
       quickAnalyzeInBackground({
         platform: 'zhihu',
+        cacheOnly: false,
         users: samples.map(({ target, answers }) => ({
           platformUserId: target.userId,
           userName: target.userName,
