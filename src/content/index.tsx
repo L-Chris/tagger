@@ -34,7 +34,7 @@ const SIMPLE_FETCH_TIMEOUT_MS = getPositiveIntegerEnv('VITE_ZHIHU_QUICK_ANALYSIS
 chrome.runtime.sendMessage({ type: 'enableSidePanelForCurrentTab' }).catch(() => undefined)
 
 function getQuickAnalysisMaxPages() {
-  return getPositiveIntegerEnv('VITE_ZHIHU_QUICK_ANALYSIS_MAX_PAGES', 1)
+  return getPositiveIntegerEnv('VITE_ZHIHU_QUICK_ANALYSIS_MAX_PAGES', 3)
 }
 
 function getPositiveIntegerEnv(key: string, fallback: number) {
