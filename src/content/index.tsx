@@ -1,10 +1,9 @@
 import { fetchAnswers, getUserId, getUserName, getUserIdFromHref, summarizeAnswers } from '@/api/zhihu'
-import type { AnalysisJsonResult, AnalysisTarget, RiskLevel, SimpleAnalysisResult } from '@/types'
+import type { AnalysisTarget, RiskLevel, SimpleAnalysisResult } from '@/types'
 import { startDevReloader } from '@/devReload'
 
 startDevReloader('content')
 
-type ChipStatus = 'idle' | 'loading' | 'done' | 'error'
 type QuickAnalysisResponse = {
   success: boolean
   data?: Array<{
@@ -19,7 +18,6 @@ type QuickAnalysisResponse = {
 }
 type StatusError = Error & { status?: number }
 
-const resultCache = new Map<string, AnalysisJsonResult>()
 const simpleResultCache = new Map<string, SimpleAnalysisResult>()
 const simpleQueue = new Map<string, AnalysisTarget>()
 const simpleInFlight = new Set<string>()
@@ -31,8 +29,6 @@ const SIMPLE_MAX_RETRIES = 2
 const SIMPLE_AUTO_ANALYSIS_ENABLED = import.meta.env.VITE_ZHIHU_AUTO_QUICK_ANALYSIS !== 'false'
 const SIMPLE_AUTO_START_DELAY_MS = getPositiveIntegerEnv('VITE_ZHIHU_AUTO_QUICK_ANALYSIS_DELAY_MS', 2000)
 const SIMPLE_FETCH_TIMEOUT_MS = getPositiveIntegerEnv('VITE_ZHIHU_QUICK_ANALYSIS_TIMEOUT_MS', 12000)
-
-chrome.runtime.sendMessage({ type: 'enableSidePanelForCurrentTab' }).catch(() => undefined)
 
 function getQuickAnalysisMaxPages() {
   return getPositiveIntegerEnv('VITE_ZHIHU_QUICK_ANALYSIS_MAX_PAGES', 3)
@@ -299,20 +295,6 @@ function getUserTypeLabel(userType?: string): string | null {
   return userType && userType !== 'uncertain' ? labels[userType] || null : null
 }
 
-function buildTagsFromAnalysisResult(result: AnalysisJsonResult): string[] {
-  const userTypeLabel = getUserTypeLabel(result.user_type)
-  const tags = buildTagsFromDimensions({
-    topic_focus: result.dimensions.topic_focus?.score,
-    repetition: result.dimensions.repetition?.score,
-    commercial_intent: result.dimensions.commercial_intent?.score,
-    emotional_manipulation: result.dimensions.emotional_manipulation?.score,
-    time_anomaly: result.dimensions.time_anomaly?.score,
-    interaction_anomaly: result.dimensions.interaction_anomaly?.score,
-    account_anomaly: result.dimensions.account_anomaly?.score,
-  }, result.total_score)
-  return userTypeLabel ? [userTypeLabel, ...tags.filter((tag) => tag !== userTypeLabel)] : tags
-}
-
 function normalizeRiskScore(value: unknown): number {
   const score = Number(value)
   if (!Number.isFinite(score)) return 0
@@ -341,113 +323,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function openSidePanel(target: AnalysisTarget, maxPages?: number) {
-  chrome.runtime.sendMessage({ type: 'openSidePanel', target, maxPages }, (res) => {
-    const runtimeError = chrome.runtime.lastError?.message
-    if (runtimeError) {
-      updateUserChips(target.userId, 'error', undefined, runtimeError)
-      return
-    }
-
-    if (!res?.ok) {
-      updateUserChips(target.userId, 'error', undefined, res?.error || '无法打开侧边栏')
-    }
-  })
-}
-
 function ensureStyle() {
   if (document.getElementById('zhihu-analyzer-style')) return
 
   const style = document.createElement('style')
   style.id = 'zhihu-analyzer-style'
   style.textContent = `
-    @keyframes za-pulse {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.35); }
-      50% { box-shadow: 0 0 0 6px rgba(102, 126, 234, 0); }
-    }
-
-    .za-analyze-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 8px 16px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      border: none;
-      border-radius: 18px;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
-      animation: za-pulse 2s ease-in-out infinite;
-    }
-
-    .za-analyze-btn:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-    }
-
-    .za-analyze-btn svg {
-      width: 16px;
-      height: 16px;
-    }
-
-    .za-user-tag {
-      display: inline-flex;
-      align-items: center;
-      height: 20px;
-      margin-left: 8px;
-      padding: 0 7px;
-      border: 1px solid #d0d7de;
-      border-radius: 10px;
-      background: #f6f8fa;
-      color: #57606a;
-      font-size: 12px;
-      font-weight: 600;
-      line-height: 18px;
-      cursor: pointer;
-      vertical-align: 1px;
-      white-space: nowrap;
-    }
-
-    .za-user-tag:hover {
-      border-color: #2f81f7;
-      color: #0969da;
-      background: #eef6ff;
-    }
-
-    .za-user-tag[data-status="loading"] {
-      border-color: #8c959f;
-      color: #57606a;
-      cursor: wait;
-    }
-
-    .za-user-tag[data-risk="低风险"] {
-      border-color: #2da44e;
-      background: #dafbe1;
-      color: #116329;
-    }
-
-    .za-user-tag[data-risk="中风险"] {
-      border-color: #bf8700;
-      background: #fff8c5;
-      color: #7d4e00;
-    }
-
-    .za-user-tag[data-risk="高风险"],
-    .za-user-tag[data-risk="极高风险"] {
-      border-color: #cf222e;
-      background: #ffebe9;
-      color: #a40e26;
-    }
-
-    .za-user-tag[data-status="error"] {
-      border-color: #cf222e;
-      background: #ffebe9;
-      color: #a40e26;
-    }
-
     .za-analysis-row {
       display: flex;
       align-items: center;
@@ -520,55 +401,6 @@ function ensureStyle() {
   document.head.appendChild(style)
 }
 
-function setChipState(chip: HTMLElement, status: ChipStatus, result?: AnalysisJsonResult, error?: string) {
-  chip.dataset.status = status
-  chip.dataset.risk = result?.risk_level || ''
-
-  if (status === 'loading') {
-    chip.hidden = false
-    chip.textContent = '分析中'
-    chip.title = '正在分析该用户'
-    return
-  }
-
-  if (status === 'error') {
-    chip.hidden = false
-    chip.textContent = '分析失败'
-    chip.title = error || '分析失败'
-    return
-  }
-
-  if (result) {
-    const tags = result.tags.length ? ` · ${result.tags.join(' / ')}` : ''
-    chip.hidden = true
-    chip.title = `${result.summary}${tags}`
-    return
-  }
-
-  chip.hidden = false
-  chip.textContent = '分析'
-  chip.title = '分析这个知乎用户'
-}
-
-function updateUserChips(userId: string, status: ChipStatus, result?: AnalysisJsonResult, error?: string) {
-  document.querySelectorAll<HTMLElement>(`.za-user-tag[data-user-id="${CSS.escape(userId)}"]`).forEach((chip) => {
-    setChipState(chip, status, result, error)
-  })
-}
-
-function setAvatarTagsState(container: HTMLElement, status: ChipStatus, result?: AnalysisJsonResult) {
-  container.replaceChildren()
-  container.dataset.status = status
-
-  if (status !== 'done' || !result) return
-
-  renderPageTags(container, {
-    score: result.total_score,
-    labels: buildTagsFromAnalysisResult(result),
-    title: result.summary,
-  })
-}
-
 function updateSimpleTags(userId: string, result: SimpleAnalysisResult) {
   document.querySelectorAll<HTMLElement>(`.za-avatar-tags[data-user-id="${CSS.escape(userId)}"]`).forEach((container) => {
     container.replaceChildren()
@@ -608,12 +440,6 @@ function getSimpleRiskLevel(score: number): RiskLevel {
   return '低风险'
 }
 
-function updateUserAvatarTags(userId: string, status: ChipStatus, result?: AnalysisJsonResult) {
-  document.querySelectorAll<HTMLElement>(`.za-avatar-tags[data-user-id="${CSS.escape(userId)}"]`).forEach((container) => {
-    setAvatarTagsState(container, status, result)
-  })
-}
-
 function getAnalysisRow(host: HTMLElement, userId: string): HTMLElement {
   let row = host.querySelector<HTMLElement>(`.za-analysis-row[data-user-id="${CSS.escape(userId)}"]`)
   if (!row) {
@@ -624,7 +450,7 @@ function getAnalysisRow(host: HTMLElement, userId: string): HTMLElement {
   return row
 }
 
-function ensureAvatarTags(nameWrap: HTMLElement, userId: string, result?: AnalysisJsonResult) {
+function ensureAvatarTags(nameWrap: HTMLElement, userId: string) {
   const authorContent = nameWrap.closest<HTMLElement>('.AuthorInfo-content')
   const authorHead = nameWrap.closest<HTMLElement>('.AuthorInfo-head')
   const authorInfo = authorContent?.parentElement || nameWrap.closest<HTMLElement>('.AuthorInfo')
@@ -646,14 +472,11 @@ function ensureAvatarTags(nameWrap: HTMLElement, userId: string, result?: Analys
     row.prepend(container)
   }
 
-  if (result) setAvatarTagsState(container, 'done', result)
-  else {
-    const simpleResult = simpleResultCache.get(userId)
-    if (simpleResult) updateSimpleTags(userId, simpleResult)
-  }
+  const simpleResult = simpleResultCache.get(userId)
+  if (simpleResult) updateSimpleTags(userId, simpleResult)
 }
 
-function ensureProfileAvatarTags(userId: string, result?: AnalysisJsonResult) {
+function ensureProfileAvatarTags(userId: string) {
   const title = document.querySelector<HTMLElement>('.ProfileHeader-title')
   if (!title) return
 
@@ -671,12 +494,9 @@ function ensureProfileAvatarTags(userId: string, result?: AnalysisJsonResult) {
     row.prepend(container)
   }
 
-  if (result) setAvatarTagsState(container, 'done', result)
-  else {
-    const simpleResult = simpleResultCache.get(userId)
-    if (simpleResult) updateSimpleTags(userId, simpleResult)
-    else enqueueSimpleAnalysis({ userId, userName: getUserName() })
-  }
+  const simpleResult = simpleResultCache.get(userId)
+  if (simpleResult) updateSimpleTags(userId, simpleResult)
+  else enqueueSimpleAnalysis({ userId, userName: getUserName() })
 }
 
 function normalizeAuthorHead(authorHead: HTMLElement) {
@@ -692,75 +512,17 @@ function normalizeAuthorHead(authorHead: HTMLElement) {
   const userId = getUserIdFromHref(nameLink.href)
   const userName = nameLink.textContent?.trim()
   if (!userId || !userName) return
-  const authorContent = authorHead.closest<HTMLElement>('.AuthorInfo-content') || authorHead.parentElement || authorHead
 
-  authorContent.querySelectorAll<HTMLButtonElement>('.za-user-tag').forEach((candidate) => {
-    if (candidate.dataset.userId !== userId) candidate.remove()
-  })
-
-  const chips = Array.from(authorContent.querySelectorAll<HTMLButtonElement>(`.za-user-tag[data-user-id="${CSS.escape(userId)}"]`))
-  const chip = chips[0] || document.createElement('button')
-  chips.slice(1).forEach((duplicate) => duplicate.remove())
-
-  const cachedResult = resultCache.get(userId)
-  const isNewChip = !chip.classList.contains('za-user-tag')
-
-  if (isNewChip) {
-    chip.type = 'button'
-    chip.className = 'za-user-tag'
-    chip.dataset.userId = userId
-    chip.dataset.role = 'detail-analysis'
-    setChipState(chip, 'idle', cachedResult)
-    chip.addEventListener('click', (event) => {
-      event.preventDefault()
-      event.stopPropagation()
-
-      updateUserChips(userId, 'loading')
-      openSidePanel({ userId, userName }, getQuickAnalysisMaxPages())
-    })
-  }
-
-  ensureAvatarTags(nameWrap, userId, cachedResult)
-  const row = authorContent.querySelector<HTMLElement>(`.za-analysis-row[data-user-id="${CSS.escape(userId)}"]`)
-  if (row && chip.parentElement !== row) row.appendChild(chip)
+  ensureAvatarTags(nameWrap, userId)
   enqueueSimpleAnalysis({ userId, userName })
 }
 
-function injectProfileButton() {
+function injectProfileTags() {
   ensureStyle()
   const userId = getUserId() || ''
   if (!userId) return
 
   ensureProfileAvatarTags(userId)
-  const title = document.querySelector<HTMLElement>('.ProfileHeader-title')
-  const row = title?.querySelector<HTMLElement>(`.za-analysis-row[data-user-id="${CSS.escape(userId)}"]`)
-  if (!row) return
-
-  const existing = row.querySelector<HTMLButtonElement>('#zhihu-analyzer-btn')
-  if (existing) return
-
-  const btn = document.createElement('button')
-  btn.id = 'zhihu-analyzer-btn'
-  btn.type = 'button'
-  btn.innerHTML = `
-    <span class="za-analyze-btn">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-      <span>分析</span>
-    </span>
-  `
-  btn.addEventListener('click', () => {
-    const userId = getUserId() || ''
-    const userName = getUserName()
-    if (!userId) return
-
-    ensureProfileAvatarTags(userId)
-    updateUserAvatarTags(userId, 'loading')
-    openSidePanel({ userId, userName })
-  })
-
-  row.appendChild(btn)
 }
 
 function injectQuestionAuthorTags() {
@@ -774,7 +536,7 @@ function injectQuestionAuthorTags() {
 }
 
 function inject() {
-  if (location.pathname.startsWith('/people/')) injectProfileButton()
+  if (location.pathname.startsWith('/people/')) injectProfileTags()
   injectQuestionAuthorTags()
 }
 
@@ -786,12 +548,12 @@ function shouldReactToMutations(mutations: MutationRecord[]): boolean {
     const nodes = [...Array.from(mutation.addedNodes), ...Array.from(mutation.removedNodes)]
     return nodes.some((node) => {
       if (node instanceof HTMLElement) {
-        return !node.matches('.za-analysis-row, .za-avatar-tags, .za-user-tag, .za-avatar-tag')
-          && !node.closest('.za-analysis-row, .za-avatar-tags, .za-user-tag')
+        return !node.matches('.za-analysis-row, .za-avatar-tags, .za-avatar-tag')
+          && !node.closest('.za-analysis-row, .za-avatar-tags')
       }
 
       const parent = node.parentElement
-      return parent ? !parent.closest('.za-analysis-row, .za-avatar-tags, .za-user-tag') : false
+      return parent ? !parent.closest('.za-analysis-row, .za-avatar-tags') : false
     })
   })
 }
@@ -852,20 +614,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .then((data) => sendResponse({ ok: true, data }))
       .catch((err) => sendResponse({ ok: false, error: String(err) }))
     return true
-  }
-
-  if (msg.type === 'sidePanelAnalysisComplete') {
-    const target = msg.target as AnalysisTarget
-    const result = msg.result as AnalysisJsonResult
-    resultCache.set(target.userId, result)
-    updateUserChips(target.userId, 'done', result)
-    updateUserAvatarTags(target.userId, 'done', result)
-  }
-
-  if (msg.type === 'sidePanelAnalysisError') {
-    const target = msg.target as AnalysisTarget
-    updateUserChips(target.userId, 'error', undefined, msg.error || '分析失败')
-    updateUserAvatarTags(target.userId, 'error')
   }
 
   sendResponse?.({ ok: true })

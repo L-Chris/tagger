@@ -3,7 +3,7 @@
   "name": "Dominator",
   "version": "1.0.0",
   "description": "分析知乎用户是否存在异常推广或操纵风险",
-  "permissions": ["activeTab", "cookies", "sidePanel", "tabs"],
+  "permissions": ["activeTab", "cookies", "tabs"],
   "host_permissions": [
     "https://www.zhihu.com/*",
     "https://api.zhihu.com/*",
@@ -14,9 +14,6 @@
   "background": {
     "service_worker": "background.js",
     "type": "module"
-  },
-  "side_panel": {
-    "default_path": "sidepanel.html"
   },
   "content_scripts": [
     {

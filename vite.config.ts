@@ -18,26 +18,6 @@ const outDir = process.env.VITE_OUT_DIR || (isDevReload ? 'dist-dev' : 'dist')
 const emptyDir = entry === 'content' && !isDevReload
 
 export default defineConfig(() => {
-  if (entry === 'sidepanel') {
-    return {
-      base: '',
-      plugins: [react()],
-      build: {
-        outDir,
-        emptyOutDir: false,
-        sourcemap: false,
-        rollupOptions: {
-          input: { [entry]: resolve(import.meta.dirname, `${entry}.html`) },
-          output: {
-            entryFileNames: '[name].js',
-            chunkFileNames: '[name].js',
-          },
-        },
-      },
-      resolve: { alias },
-    }
-  }
-
   return {
     plugins: [react(), stripExports()],
     build: {
