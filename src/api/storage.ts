@@ -1,1 +1,1 @@
-export const SERVICE_URL = 'http://dominator.home.com'
+export const SERVICE_URL = 'https://dominator.rethinkos.com'
